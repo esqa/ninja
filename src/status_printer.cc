@@ -14,6 +14,10 @@
 
 #include "status_printer.h"
 
+#include <chrono>
+#include <iomanip>
+#include <iostream>
+
 #ifdef _WIN32
 #include "win32port.h"
 #else
@@ -207,7 +211,8 @@ void StatusPrinter::RecalculateProgressPrediction() {
 }
 
 void StatusPrinter::BuildEdgeFinished(Edge* edge, int64_t start_time_millis,
-                                      int64_t end_time_millis, ExitStatus exit_code,
+                                      int64_t end_time_millis,
+                                      ExitStatus exit_code,
                                       const string& output) {
   time_millis_ = end_time_millis;
   ++finished_edges_;
@@ -243,9 +248,9 @@ void StatusPrinter::BuildEdgeFinished(Edge* edge, int64_t start_time_millis,
 
     string failed = "FAILED: [code=" + std::to_string(exit_code) + "] ";
     if (printer_.supports_color()) {
-        printer_.PrintOnNewLine("\x1B[31m" + failed + "\x1B[0m" + outputs + "\n");
+      printer_.PrintOnNewLine("\x1B[31m" + failed + "\x1B[0m" + outputs + "\n");
     } else {
-        printer_.PrintOnNewLine(failed + outputs + "\n");
+      printer_.PrintOnNewLine(failed + outputs + "\n");
     }
     printer_.PrintOnNewLine(edge->EvaluateCommand() + "\n");
   }
@@ -282,15 +287,28 @@ void StatusPrinter::BuildEdgeFinished(Edge* edge, int64_t start_time_millis,
   }
 }
 
+using namespace std::chrono;
+
+static steady_clock::time_point t_start{};
+
 void StatusPrinter::BuildStarted() {
   started_edges_ = 0;
   finished_edges_ = 0;
   running_edges_ = 0;
+
+  t_start = steady_clock::now(); // ss
 }
 
 void StatusPrinter::BuildFinished() {
   printer_.SetConsoleLocked(false);
   printer_.PrintOnNewLine("");
+
+  auto elapsed = steady_clock::now() - t_start;
+  duration<double> seconds = elapsed;
+
+  std::cout << "ninja: build took "
+            << std::fixed << std::setprecision(4)
+            << seconds.count() << " seconds\n";
 }
 
 string StatusPrinter::FormatProgressStatus(const char* progress_status_format,
@@ -482,16 +500,15 @@ string StatusPrinter::FormatStatusVariable(StringPiece name) const {
     return buf;
   }
 
-  if (name == "elapsed" || name == "elapsed_seconds" ||
-      name == "eta" || name == "eta_seconds") {
+  if (name == "elapsed" || name == "elapsed_seconds" || name == "eta" ||
+      name == "eta_seconds") {
     double elapsed_sec = time_millis_ / 1e3;
     double eta_sec = -1;
     if (time_predicted_percentage_ != 0.0) {
       double total_wall_time = time_millis_ / time_predicted_percentage_;
       eta_sec = (total_wall_time - time_millis_) / 1e3;
     }
-    const bool print_with_hours =
-        elapsed_sec >= 60 * 60 || eta_sec >= 60 * 60;
+    const bool print_with_hours = elapsed_sec >= 60 * 60 || eta_sec >= 60 * 60;
     const bool is_eta = (name == "eta" || name == "eta_seconds");
     double sec = is_eta ? eta_sec : elapsed_sec;
     if (sec < 0)
@@ -515,8 +532,8 @@ void StatusPrinter::PrintStatus(const Edge* edge, int64_t time_millis) {
     explanations_->ExplainEdge(edge);
   }
 
-  if (config_.verbosity == BuildConfig::QUIET
-      || config_.verbosity == BuildConfig::NO_STATUS_UPDATE)
+  if (config_.verbosity == BuildConfig::QUIET ||
+      config_.verbosity == BuildConfig::NO_STATUS_UPDATE)
     return;
 
   RecalculateProgressPrediction();
@@ -536,8 +553,8 @@ void StatusPrinter::PrintStatus(const Edge* edge, int64_t time_millis) {
     StatusFormatEnv env(this, description);
     to_print = status_eval_->Evaluate(&env);
   } else {
-    to_print = FormatProgressStatus(progress_status_format_, time_millis)
-        + description;
+    to_print = FormatProgressStatus(progress_status_format_, time_millis) +
+               description;
   }
 
   printer_.Print(to_print,
